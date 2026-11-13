@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>李杜诗韵 · 李白与杜甫诗歌可视化</title>
+<style>
+  /* ===== 全局重置 ===== */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif; }
+
+  /* ===== 背景：宣纸纹理 + 远山墨影 ===== */
+  body {
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(180, 50, 40, 0.08), transparent 60%),
+      radial-gradient(ellipse at 80% 90%, rgba(50, 80, 120, 0.10), transparent 60%),
+      linear-gradient(135deg, #f5efe2 0%, #e8ddc8 50%, #dfd3b9 100%);
+    color: #2c2418;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.45 0 0 0 0 0.30 0 0 0 0.18 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity: 0.45; mix-blend-mode: multiply; pointer-events: none; z-index: 0;
+  }
+
+  /* ===== 封面大图：山水剪影（SVG 内嵌） ===== */
+  .slide-deco {
+    position: absolute; bottom: 0; left: 0; width: 100%; height: 38%;
+    pointer-events: none; opacity: 0.55; z-index: 1;
+  }
+
+  /* ===== 顶部标题栏 ===== */
+  .top-bar {
+    position: fixed; top: 0; left: 0; right: 0; height: 72px; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 48px;
+    background: linear-gradient(180deg, rgba(245,239,226,0.92), rgba(245,239,226,0));
+    backdrop-filter: blur(6px);
+  }
+  .brand {
+    font-size: 22px; letter-spacing: 8px; color: #7a2a1f; font-weight: 700;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.6);
+  }
+  .brand .sub { font-size: 13px; letter-spacing: 2px; color: #6b5a3e; margin-left: 12px; font-weight: 400; }
+  .page-indicator {
+    font-size: 14px; color: #6b5a3e; letter-spacing: 3px;
+  }
+  .page-indicator b { color: #7a2a1f; font-size: 18px; font-weight: 700; }
+
+  /* ===== 滑动容器 ===== */
+  .slides {
+    position: relative; width: 100%; height: 100%; z-index: 2;
+  }
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 100px 80px 80px;
+    opacity: 0; transform: translateX(60px);
+    transition: opacity 0.9s ease, transform 0.9s ease;
+    pointer-events: none;
+  }
+  .slide.active { opacity: 1; transform: translateX(0); pointer-events: auto; }
+  .slide.prev    { opacity: 0; transform: translateX(-60px); pointer-events: none; }
+
+  /* ===== 左右切页箭头 ===== */
+  .nav-arrow {
+    position: fixed; top: 50%; transform: translateY(-50%);
+    width: 52px; height: 52px; border-radius: 50%;
+    background: rgba(245, 239, 226, 0.9);
+    border: 1px solid rgba(122, 42, 31, 0.4);
+    color: #7a2a1f; font-size: 24px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 60; transition: all 0.3s;
+    box-shadow: 0 4px 16px rgba(60, 30, 10, 0.15);
+  }
+  .nav-arrow:hover { background: #7a2a1f; color: #f5efe2; transform: translateY(-50%) scale(1.08); }
+  .nav-arrow.left  { left: 24px; }
+  .nav-arrow.right { right: 24px; }
+
+  /* ===== 底部指示器（三个小圆点） ===== */
+  .dots {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 14px; z-index: 60;
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: rgba(122, 42, 31, 0.25); cursor: pointer;
+    transition: all 0.3s; border: 2px solid transparent;
+  }
+  .dot.active { background: #7a2a1f; transform: scale(1.3); border-color: rgba(122,42,31,0.3); }
+
+  /* ===== 切页标题 ===== */
+  .slide-title {
+    position: absolute; top: 100px; left: 80px;
+    font-size: 48px; font-weight: 900; color: #7a2a1f;
+    letter-spacing: 12px; line-height: 1.1;
+    text-shadow: 1px 2px 0 rgba(255,255,255,0.5);
+  }
+  .slide-title .num {
+    display: block; font-size: 16px; letter-spacing: 6px;
+    color: #6b5a3e; font-weight: 400; margin-bottom: 8px;
+  }
+  .slide-subtitle {
+    position: absolute; top: 170px; left: 80px;
+    font-size: 16px; color: #6b5a3e; letter-spacing: 3px;
+  }
+
+  /* ===== 第一/二页通用布局 ===== */
+  .poet-layout {
+    display: grid; grid-template-columns: 340px 1fr; gap: 60px;
+    width: 100%; max-width: 1400px;
+    align-items: center;
+  }
+  /* 诗人画像卡 */
+  .portrait-card {
+    position: relative;
+    width: 320px; height: 460px;
+    background: linear-gradient(145deg, #fffaf0, #f0e6d0);
+    border: 2px solid #7a2a1f; border-radius: 6px;
+    box-shadow: 0 20px 50px rgba(60,30,10,0.25), inset 0 0 40px rgba(122,42,31,0.08);
+    overflow: hidden;
+  }
+  .portrait-card::before, .portrait-card::after {
+    content: ""; position: absolute; width: 32px; height: 32px; border: 2px solid #7a2a1f;
+  }
+  .portrait-card::before { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+  .portrait-card::after  { bottom: 8px; right: 8px; border-left: none; border-top: none; }
+  .portrait-card img {
+    width: 100%; height: 380px; object-fit: cover; display: block;
+    filter: sepia(0.15) contrast(1.05);
+  }
+  .portrait-card .caption {
+    height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, transparent, rgba(122,42,31,0.08));
+    border-top: 1px dashed #7a2a1f;
+  }
+  .portrait-card .caption .name { font-size: 26px; font-weight: 700; color: #7a2a1f; letter-spacing: 6px; }
+  .portrait-card .caption .dynasty { font-size: 12px; color: #6b5a3e; letter-spacing: 3px; margin-top: 4px; }
+
+  /* 诗句瀑布流 */
+  .poem-section {
+    background: rgba(255, 250, 240, 0.7);
+    border: 1px solid rgba(122,42,31,0.25);
+    border-radius: 8px;
+    padding: 28px 32px;
+    max-height: 560px; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .poem-section h3 {
+    font-size: 18px; letter-spacing: 4px; color: #7a2a1f; font-weight: 700;
+    margin-bottom: 16px; padding-bottom: 10px;
+    border-bottom: 2px solid #7a2a1f;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .poem-section h3 .stat { font-size: 13px; color: #6b5a3e; letter-spacing: 2px; font-weight: 400; }
+  .poem-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px;
+    overflow-y: auto; padding-right: 8px;
+  }
+  .poem-grid::-webkit-scrollbar { width: 6px; }
+  .poem-grid::-webkit-scrollbar-thumb { background: rgba(122,42,31,0.3); border-radius: 3px; }
+  .poem-item {
+    background: rgba(255,255,255,0.6);
+    border-left: 3px solid #7a2a1f;
+    padding: 10px 14px;
+    border-radius: 2px;
+    transition: transform 0.25s, box-shadow 0.25s;
+    cursor: default;
+  }
+  .poem-item:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 14px rgba(122,42,31,0.15);
+    background: rgba(255,250,240,0.95);
+  }
+  .poem-item .title {
+    font-size: 13px; color: #6b5a3e; letter-spacing: 1px; margin-bottom: 4px;
+    display: flex; justify-content: space-between;
+  }
+  .poem-item .title .idx { color: #a89473; font-size: 11px; }
+  .poem-item .verse {
+    font-size: 17px; color: #2c2418; font-weight: 600; letter-spacing: 1px;
+  }
+
+  /* ===== 第三页：李杜对比 ===== */
+  .compare-layout {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 40px;
+    width: 100%; max-width: 1400px;
+    max-height: 70vh;
+  }
+  .compare-panel {
+    background: rgba(255, 250, 240, 0.75);
+    border: 1px solid rgba(122,42,31,0.25);
+    border-radius: 8px;
+    padding: 24px 28px;
+    display: flex; flex-direction: column;
+  }
+  .compare-panel h3 {
+    font-size: 20px; letter-spacing: 4px; color: #7a2a1f; font-weight: 700;
+    margin-bottom: 14px; padding-bottom: 10px;
+    border-bottom: 2px solid #7a2a1f;
+  }
+  .pair-list {
+    overflow-y: auto; padding-right: 6px;
+  }
+  .pair-list::-webkit-scrollbar { width: 6px; }
+  .pair-list::-webkit-scrollbar-thumb { background: rgba(122,42,31,0.3); border-radius: 3px; }
+
+  .pair-item {
+    background: rgba(255,255,255,0.55);
+    border: 1px solid rgba(122,42,31,0.15);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    transition: all 0.25s;
+  }
+  .pair-item:hover {
+    background: rgba(255,250,240,0.95);
+    box-shadow: 0 6px 18px rgba(122,42,31,0.15);
+    transform: translateY(-2px);
+  }
+  .pair-poets {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .poet-tag {
+    font-size: 12px; padding: 3px 10px; border-radius: 12px; letter-spacing: 2px; font-weight: 700;
+  }
+  .tag-li  { background: rgba(200, 140, 50, 0.25); color: #8a5a15; border: 1px solid rgba(200,140,50,0.4); }
+  .tag-du  { background: rgba(70, 100, 160, 0.22); color: #2a4070; border: 1px solid rgba(70,100,160,0.4); }
+  .sim-badge {
+    font-size: 14px; font-weight: 800; color: #7a2a1f;
+    padding: 4px 12px; border: 2px solid #7a2a1f; border-radius: 4px;
+    background: rgba(122,42,31,0.08);
+  }
+  .sim-bar {
+    height: 4px; margin-top: 6px; border-radius: 2px;
+    background: linear-gradient(90deg, #e5cd9a, #7a2a1f);
+  }
+  .pair-verses {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+  .verse-box {
+    padding: 8px 10px; border-radius: 3px; font-size: 16px; font-weight: 600;
+    line-height: 1.5; letter-spacing: 1px;
+  }
+  .verse-box.li { background: rgba(200,140,50,0.12); color: #5a3a0a; border-left: 3px solid #c88c32; }
+  .verse-box.du { background: rgba(70,100,160,0.10); color: #2a4070; border-left: 3px solid #4664a0; }
+  .verse-src { font-size: 12px; font-weight: 400; color: #6b5a3e; margin-top: 4px; letter-spacing: 0.5px; }
+
+  /* 相似度分布柱状图 */
+  .chart-wrap {
+    margin-top: 10px; padding-top: 14px;
+    border-top: 1px dashed rgba(122,42,31,0.3);
+  }
+  .chart-title {
+    font-size: 13px; color: #6b5a3e; letter-spacing: 2px; margin-bottom: 10px;
+    display: flex; justify-content: space-between;
+  }
+  .bar-chart {
+    display: flex; align-items: flex-end; gap: 4px; height: 100px;
+    padding: 0 4px;
+  }
+  .bar-chart .bar {
+    flex: 1; background: linear-gradient(180deg, #c88c32, #7a2a1f);
+    border-radius: 3px 3px 0 0; min-height: 2px;
+    transition: height 0.8s ease;
+    position: relative;
+  }
+  .bar-chart .bar:hover::after {
+    content: attr(data-val);
+    position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
+    background: #7a2a1f; color: #f5efe2; font-size: 11px; padding: 2px 6px; border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* 双圆关系图（示意） */
+  .venn-wrap {
+    display: flex; justify-content: center; align-items: center; gap: 30px;
+    margin-bottom: 14px;
+  }
+  .venn-circle {
+    width: 120px; height: 120px; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 22px; letter-spacing: 4px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  }
+  .venn-circle.li-circle {
+    background: radial-gradient(circle at 35% 35%, rgba(220,160,60,0.85), rgba(160,100,30,0.9));
+    color: #fff8e6;
+  }
+  .venn-circle.du-circle {
+    background: radial-gradient(circle at 35% 35%, rgba(90,120,180,0.85), rgba(50,75,140,0.9));
+    color: #f0f4ff;
+  }
+  .venn-circle .v-sub { font-size: 11px; letter-spacing: 1px; font-weight: 400; opacity: 0.9; }
+
+  /* ===== 加载提示 ===== */
+  .loading {
+    position: fixed; inset: 0; z-index: 100;
+    background: #f5efe2; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 20px; transition: opacity 0.6s;
+  }
+  .loading.hidden { opacity: 0; pointer-events: none; }
+  .loading .spinner {
+    width: 60px; height: 60px; border: 3px solid rgba(122,42,31,0.15);
+    border-top-color: #7a2a1f; border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  .loading .txt { font-size: 16px; color: #7a2a1f; letter-spacing: 4px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 响应式 */
+  @media (max-width: 1024px) {
+    .poet-layout { grid-template-columns: 1fr; gap: 30px; }
+    .compare-layout { grid-template-columns: 1fr; }
+    .slide-title { font-size: 36px; top: 90px; left: 32px; }
+    .slide-subtitle { top: 145px; left: 32px; }
+    .slide { padding: 90px 32px 60px; }
+    .top-bar { padding: 0 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 加载层 -->
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <div class="txt">正在载入诗卷 · 请稍候</div>
+</div>
+
+<!-- 顶部 -->
+<div class="top-bar">
+  <div class="brand">李杜诗韵 <span class="sub">· 李白杜甫诗歌可视化 ·</span></div>
+  <div class="page-indicator">第 <b id="pageNum">1</b> 页 / 共 3 页</div>
+</div>
+
+<!-- 左右箭头 -->
+<div class="nav-arrow left"  id="prevBtn" title="上一页">‹</div>
+<div class="nav-arrow right" id="nextBtn" title="下一页">›</div>
+
+<!-- 三个切页 -->
+<div class="slides" id="slides">
+
+  <!-- 第一页：李白 -->
+  <section class="slide active" data-index="0">
+    <!-- SVG 山水剪影装饰 -->
+    <svg class="slide-deco" viewBox="0 0 1400 300" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0,280 L0,220 C120,160 220,190 340,140 C430,105 500,160 620,120 C730,85 820,150 940,110 C1060,70 1150,140 1280,115 C1340,105 1380,130 1400,125 L1400,300 L0,300 Z" fill="#8a6035" opacity="0.35"/>
+      <path d="M0,290 L0,250 C100,210 200,230 320,210 C440,190 520,230 650,210 C770,190 860,230 980,215 C1100,200 1180,230 1300,215 L1400,205 L1400,300 L0,300 Z" fill="#5c3a1f" opacity="0.55"/>
+    </svg>
+    <div class="slide-title">
+      <span class="num">第 壹 页 · 诗 仙</span>
+      李 白
+    </div>
+    <div class="slide-subtitle">斗酒诗百篇 · 天子呼来不上船</div>
+
+    <div class="poet-layout">
+      <div class="portrait-card">
+        <img src="李白.jpg" alt="李白">
+        <div class="caption">
+          <div class="name">李 白</div>
+          <div class="dynasty">唐 · 701 — 762</div>
+        </div>
+      </div>
+      <div class="poem-section">
+        <h3>
+          诗 歌 摘 句
+          <span class="stat" id="liStat">共 0 首 / 0 句</span>
+        </h3>
+        <div class="poem-grid" id="liGrid">
+          <!-- JS 注入 -->
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 第二页：杜甫 -->
+  <section class="slide" data-index="1">
+    <svg class="slide-deco" viewBox="0 0 1400 300" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0,285 L0,230 C140,180 260,210 380,170 C490,135 570,190 700,150 C820,115 910,175 1030,140 C1150,105 1240,170 1360,150 L1400,145 L1400,300 L0,300 Z" fill="#3a5480" opacity="0.35"/>
+      <path d="M0,292 L0,260 C110,230 220,250 340,235 C460,220 540,250 670,230 C790,210 880,250 1000,235 C1120,220 1200,250 1320,235 L1400,228 L1400,300 L0,300 Z" fill="#2a3e66" opacity="0.55"/>
+    </svg>
+    <div class="slide-title">
+      <span class="num">第 贰 页 · 诗 圣</span>
+      杜 甫
+    </div>
+    <div class="slide-subtitle">笔落惊风雨 · 诗成泣鬼神</div>
+
+    <div class="poet-layout">
+      <div class="portrait-card">
+        <img src="杜甫.jpg" alt="杜甫">
+        <div class="caption">
+          <div class="name">杜 甫</div>
+          <div class="dynasty">唐 · 712 — 770</div>
+        </div>
+      </div>
+      <div class="poem-section">
+        <h3>
+          诗 歌 摘 句
+          <span class="stat" id="duStat">共 0 首 / 0 句</span>
+        </h3>
+        <div class="poem-grid" id="duGrid">
+          <!-- JS 注入 -->
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 第三页：李杜对比 -->
+  <section class="slide" data-index="2">
+    <svg class="slide-deco" viewBox="0 0 1400 300" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0,280 L0,220 C180,160 320,200 460,150 C580,108 680,180 820,130 C960,80 1060,170 1220,130 C1300,110 1360,140 1400,135 L1400,300 L0,300 Z" fill="#5a3a2a" opacity="0.30"/>
+      <path d="M0,292 L0,260 C150,225 280,245 420,225 C560,205 660,245 800,225 C940,205 1040,245 1180,225 C1280,210 1350,235 1400,230 L1400,300 L0,300 Z" fill="#3a2516" opacity="0.55"/>
+    </svg>
+    <div class="slide-title">
+      <span class="num">第 叁 页 · 千 秋 对 话</span>
+      李 杜 诗 句 相 似 度
+    </div>
+    <div class="slide-subtitle">词向量相似度匹配 · 跨越时空的诗心共鸣</div>
+
+    <div class="compare-layout">
+      <div class="compare-panel">
+        <h3>诗 心 共 鸣 点 <span style="font-size:13px; letter-spacing:2px; color:#6b5a3e; font-weight:400;" id="pairStat">共 0 对</span></h3>
+        <div class="pair-list" id="pairList">
+          <!-- JS 注入 -->
+        </div>
+      </div>
+      <div class="compare-panel">
+        <h3>相 似 度 分 布</h3>
+        <div class="venn-wrap" id="vennWrap">
+          <div class="venn-circle li-circle"><span>李 白</span><span class="v-sub" id="liCount">0 句</span></div>
+          <div class="venn-circle du-circle"><span>杜 甫</span><span class="v-sub" id="duCount">0 句</span></div>
+        </div>
+
+        <div class="chart-wrap">
+          <div class="chart-title">
+            <span>相 似 度 柱 状 图</span>
+            <span id="simRange" style="font-size:12px;">—</span>
+          </div>
+          <div class="bar-chart" id="barChart">
+            <!-- JS 注入 -->
+          </div>
+        </div>
+
+        <div style="margin-top:18px; padding:14px 16px; background:rgba(122,42,31,0.06); border-radius:4px; border-left:3px solid #7a2a1f;">
+          <div style="font-size:13px; color:#7a2a1f; letter-spacing:3px; margin-bottom:6px; font-weight:700;">解 读</div>
+          <div style="font-size:13px; color:#4a3a20; line-height:1.8;" id="insight">
+            在唐诗的星河中，李白如明月高悬，杜甫如大地沉厚。
+            虽诗风迥异，然其诗句间常有意象暗合、情怀相通之处。
+            下图以词向量相似度为绳，牵起两位巨匠跨越时空的诗心对话。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- 底部三个圆点 -->
+<div class="dots" id="dots">
+  <div class="dot active" data-index="0"></div>
+  <div class="dot" data-index="1"></div>
+  <div class="dot" data-index="2"></div>
+</div>
+
+<script>
+/* =========================================================
+   通用 CSV 解析（支持 BOM、引号转义）
+   ========================================================= */
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, ''); // 去 BOM
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') {
+        if (text[i+1] === '"') { field += '"'; i++; }
+        else inQ = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length >= 2 && r.some(x => x && x.trim()));
+}
+
+/* =========================================================
+   数据加载
+   ========================================================= */
+async function loadCSV(url) {
+  const resp = await fetch(url, { cache: 'no-cache' });
+  if (!resp.ok) throw new Error('加载失败: ' + url);
+  return parseCSV(await resp.text());
+}
+
+/* =========================================================
+   第一 / 二页：渲染诗句卡
+   rows: [诗名, 诗句, 诗编号, 位置编号]
+   ========================================================= */
+function renderPoemGrid(rows, gridId, statId) {
+  const grid = document.getElementById(gridId);
+  // 按诗编号聚合，统计
+  const poemIds = new Set();
+  rows.forEach(r => { if (r[2]) poemIds.add(r[2].trim()); });
+
+  // 只取前 80 条渲染，保证滚动区美观
+  const show = rows.slice(0, 80);
+  grid.innerHTML = show.map((r, i) => `
+    <div class="poem-item" style="animation: fadeUp 0.5s ease ${Math.min(i*0.02, 0.3)}s both;">
+      <div class="title">
+        <span>${r[0] || '—'}</span>
+        <span class="idx">#${r[2] || '?'} · 句${(r[3]||0)+1}</span>
+      </div>
+      <div class="verse">${r[1] || ''}</div>
+    </div>
+  `).join('');
+
+  document.getElementById(statId).textContent =
+    `共 ${poemIds.size} 首 / ${rows.length} 句（展示前 ${show.length} 句）`;
+
+  // 注入淡入动画
+  if (!document.getElementById('fadeUpKey')) {
+    const s = document.createElement('style');
+    s.id = 'fadeUpKey';
+    s.textContent = `@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }`;
+    document.head.appendChild(s);
+  }
+}
+
+/* =========================================================
+   第三页：渲染对比
+   rows: [李白, 李白诗, 李白句, 杜甫, 杜甫诗, 杜甫句, 相似度, 李白诗编号, 李白位置, 杜甫诗编号, 杜甫位置]
+   ========================================================= */
+function renderCompare(rows) {
+  const pairList = document.getElementById('pairList');
+
+  // 解析相似度数值
+  const data = rows.map(r => ({
+    liPoet: r[0] || '李白', liPoem: r[1] || '', liVerse: r[2] || '',
+    duPoet: r[3] || '杜甫', duPoem: r[4] || '', duVerse: r[5] || '',
+    sim: parseFloat(r[6]) || 0,
+    liPid: r[7] || '', liPos: r[8] || '',
+    duPid: r[9] || '', duPos: r[10] || ''
+  }));
+
+  // 按相似度降序
+  data.sort((a,b) => b.sim - a.sim);
+
+  // 李白/杜甫涉及的诗句数（去重）
+  const liVerses = new Set(data.map(d => d.liPoem + '|' + d.liVerse));
+  const duVerses = new Set(data.map(d => d.duPoem + '|' + d.duVerse));
+  document.getElementById('liCount').textContent = liVerses.size + ' 句参与';
+  document.getElementById('duCount').textContent = duVerses.size + ' 句参与';
+  document.getElementById('pairStat').textContent = `共 ${data.length} 对`;
+
+  // 渲染前 100 对（滚动显示）
+  const show = data.slice(0, 100);
+  pairList.innerHTML = show.map((d, i) => {
+    // 把 0~10000 的相似度归一化到 0~100 用作进度条
+    const simNorm = Math.min(100, (d.sim / 10000) * 100);
+    return `
+      <div class="pair-item" style="animation: fadeUp 0.5s ease ${Math.min(i*0.015, 0.4)}s both;">
+        <div class="pair-poets">
+          <div>
+            <span class="poet-tag tag-li">李 白</span>
+            <span class="poet-tag tag-du" style="margin-left:6px;">杜 甫</span>
+          </div>
+          <div class="sim-badge">${(d.sim/100).toFixed(2)}</div>
+        </div>
+        <div class="sim-bar" style="width:${simNorm}%;"></div>
+        <div class="pair-verses" style="margin-top:10px;">
+          <div class="verse-box li">
+            ${d.liVerse}
+            <div class="verse-src">《${d.liPoem}》 #${d.liPid} · 句${(d.liPos||0)+1}</div>
+          </div>
+          <div class="verse-box du">
+            ${d.duVerse}
+            <div class="verse-src">《${d.duPoem}》 #${d.duPid} · 句${(d.duPos||0)+1}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // ---- 相似度分布柱状图 ----
+  const barChart = document.getElementById('barChart');
+  // 取相似度 Top 300 做 20 个 bin
+  const topN = data.slice(0, Math.min(data.length, 300));
+  const sims = topN.map(d => d.sim);
+  const minS = Math.min(...sims), maxS = Math.max(...sims);
+  const bins = 20;
+  const binCount = new Array(bins).fill(0);
+  sims.forEach(s => {
+    const idx = Math.min(bins - 1, Math.floor(((s - minS) / (maxS - minS || 1)) * bins));
+    binCount[idx]++;
+  });
+  const maxCount = Math.max(...binCount, 1);
+  barChart.innerHTML = binCount.map((c, i) => {
+    const h = (c / maxCount) * 100;
+    const lo = minS + (maxS - minS) * (i / bins);
+    const hi = minS + (maxS - minS) * ((i+1) / bins);
+    return `<div class="bar" style="height:${h}%;" data-val="${(lo/100).toFixed(1)}~${(hi/100).toFixed(1)}：${c}对"></div>`;
+  }).join('');
+  document.getElementById('simRange').textContent =
+    `相似度范围 ${(minS/100).toFixed(2)} ~ ${(maxS/100).toFixed(2)}`;
+
+  // 底部 insight 自动生成
+  const avg = sims.reduce((a,b)=>a+b,0) / sims.length;
+  const top3 = data.slice(0,3).map(d => `「${d.liVerse}」≈「${d.duVerse}」`).join('；');
+  document.getElementById('insight').innerHTML = `
+    本次共匹配到 <b>${data.length}</b> 对诗句，涉及李白 <b>${liVerses.size}</b> 句、杜甫 <b>${duVerses.size}</b> 句。<br>
+    相似度均值 <b>${(avg/100).toFixed(2)}</b>，最高可达 <b>${(maxS/100).toFixed(2)}</b>。<br>
+    相似度前三：${top3}
+  `;
+}
+
+/* =========================================================
+   切页控制
+   ========================================================= */
+let currentSlide = 0;
+const totalSlides = 3;
+
+function goSlide(idx) {
+  currentSlide = (idx + totalSlides) % totalSlides;
+  document.querySelectorAll('.slide').forEach((s, i) => {
+    s.classList.remove('active', 'prev');
+    if (i === currentSlide) s.classList.add('active');
+    else if (i < currentSlide) s.classList.add('prev');
+  });
+  document.querySelectorAll('.dot').forEach((d, i) => {
+    d.classList.toggle('active', i === currentSlide);
+  });
+  document.getElementById('pageNum').textContent = currentSlide + 1;
+}
+
+document.getElementById('prevBtn').addEventListener('click', () => goSlide(currentSlide - 1));
+document.getElementById('nextBtn').addEventListener('click', () => goSlide(currentSlide + 1));
+document.querySelectorAll('.dot').forEach(d => {
+  d.addEventListener('click', () => goSlide(parseInt(d.dataset.index)));
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft')  goSlide(currentSlide - 1);
+  if (e.key === 'ArrowRight') goSlide(currentSlide + 1);
+});
+
+/* =========================================================
+   主流程
+   ========================================================= */
+(async function main() {
+  try {
+    const [li, du, pair] = await Promise.all([
+      loadCSV('李白.csv'),
+      loadCSV('杜甫.csv'),
+      loadCSV('李白-杜甫.csv')
+    ]);
+
+    renderPoemGrid(li, 'liGrid', 'liStat');
+    renderPoemGrid(du, 'duGrid', 'duStat');
+    renderCompare(pair);
+
+    // 让第三页诗句卡比前两页略少的重复动画节奏
+    setTimeout(() => {
+      document.getElementById('loading').classList.add('hidden');
+      setTimeout(() => document.getElementById('loading').remove(), 700);
+    }, 300);
+  } catch (err) {
+    console.error(err);
+    document.getElementById('loading').querySelector('.txt').textContent =
+      '加载失败：请通过本地服务器打开（如 python3 -m http.server），或将 csv 与 html 放在同一目录';
+  }
+})();
+</script>
+</body>
+</html>
